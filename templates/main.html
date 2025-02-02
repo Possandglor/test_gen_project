@@ -1,0 +1,345 @@
+<!doctype html>
+<html>
+
+<head>
+    <title>Main</title>
+    <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <div class="form-container">
+            <h2>Приватбанк - беремо і транскрибуємо!</h2>
+            <div>
+                <!-- Вкладки -->
+                <div class="tab">
+                    <button class="tablinks active" onclick="openForm(event, 'audioForm')">Аудіо/відео</button>
+                    <button class="tablinks" onclick="openForm(event, 'docxForm')">DOCX</button>
+                </div>
+
+                <!-- Форма для аудио файлов -->
+                <div id="audioForm" class="tabcontent" style="display: block;">
+                    <form id="summarizeAudioForm" enctype="multipart/form-data">
+                        <div>
+                            <label for="audioFile">Оберіть аудіо/відео файл(-и) (mp3, wav, mp4, m4a):</label>
+                            <input type="file" name="file" accept=".mp3,.wav,.mp4,.m4a" required multiple>
+                        </div>
+                        <div>
+                            <label for="prompt">Що необхідно зробити з текстом:</label>
+                            <textarea type="text" id="user_prompt" name="prompt" required></textarea>
+                        </div>
+                        <div>
+                            <label for="model">Модель:</label>
+                            <select id="model" name="model" required>
+                                <option value="chirp2-uk">chirp2-uk</option>
+                                <option value="chirp-uk">chirp-uk</option>
+                                <option value="long-uk">long-uk</option>
+                                <option value="short">short</option>
+                                <option value="gemini-1.5-flash-001">gemini-1.5-flash-001</option>
+                                <option value="gemini-1.5-pro-001">gemini-1.5-pro-001</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="is_return_text">Чи повертати транскрибований текст:</label>
+                            <input type="checkbox" name="is_return_text">
+                        </div>
+                        <div>
+                            <button type="submit" id="submitButton">Відправити</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Форма для DOCX файлов -->
+                <div id="docxForm" class="tabcontent" style="display: none;">
+                    <form id="summarizeDocxForm" enctype="multipart/form-data">
+                        <div>
+                            <label for="docxFile">Оберіть DOCX файл(-и):</label>
+                            <input type="file" name="file" accept=".docx" required multiple>
+                        </div>
+                        <div>
+                            <label for="docxPrompt">Що необхідно зробити з текстом:</label>
+                            <textarea type="text" id="docx_user_prompt" name="prompt" required></textarea>
+                        </div>
+                        <div>
+                            <label for="modelname">Модель:</label>
+                            <select id="modelname" name="model" required>
+                                <option value="gemini-1.5-flash-001">gemini-1.5-flash-001</option>
+                                <option value="gemini-1.5-pro-001">gemini-1.5-pro-001</option>
+                            </select>
+                        </div>
+                        <div>
+                            <button type="submit" id="docxSubmitButton">Відправити</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div>Час запиту: <span id="timer">0</span> seconds</div>
+            <div id="result">
+                <textarea id="summirized_data" style="display: none;"></textarea>
+                <textarea id="transcript" style="display: none;"></textarea>
+                <img id="gifwait" src="videosummarystatic/ZZ5H.gif" style="display: none; width: 50%; height: 50%;">
+            </div>
+        </div>
+    </div>
+    <script>
+        function toggleForm() {
+            const formType = document.getElementById('formType').value;
+            const audioForm = document.getElementById('audioForm');
+            const docxForm = document.getElementById('docxForm');
+
+            if (formType === 'audio') {
+                audioForm.style.display = 'block';
+                docxForm.style.display = 'none';
+            } else if (formType === 'docx') {
+                audioForm.style.display = 'none';
+                docxForm.style.display = 'block';
+            }
+        }
+        function openForm(evt, formName) {
+            var i, tabcontent, tablinks;
+
+            // Скрыть все формы
+            tabcontent = document.getElementsByClassName("tabcontent");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+
+            // Удалить класс active у всех кнопок вкладок
+            tablinks = document.getElementsByClassName("tablinks");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+
+            // Показать текущую форму и сделать вкладку активной
+            document.getElementById(formName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+        $(document).ready(function () {
+            $('#summarizeAudioForm').on('submit', function (event) {
+                let startTime = Date.now();  // Время начала таймера
+                let timerElement = document.getElementById('timer');
+
+                let interval = setInterval(function () {
+                    let elapsedTime = Math.floor((Date.now() - startTime) / 1000);  // Время, прошедшее с начала в секундах
+                    timerElement.textContent = elapsedTime;
+                }, 1000);
+                event.preventDefault();
+                var formData = new FormData(this);
+                $('#submitButton').prop('disabled', true);
+
+                document.getElementById('summirized_data').setAttribute("style", "display: none;")
+                document.getElementById('transcript').setAttribute("style", "display: none;")
+                document.getElementById("gifwait").removeAttribute("style")
+                // Получаем все файлы из инпута
+                let files = formData.getAll("file");
+                let totalFiles = files.length;
+
+                // Функция для загрузки одного файла по частям
+                var uploadFileInChunks = async function (file) {
+                    var chunkSize = 5 * 1024 * 1024; // 5MB
+                    var totalChunks = Math.ceil(file.size / chunkSize);
+
+                    var uploadChunk = function (chunk, chunkIndex) {
+                        var formData = new FormData();
+                        formData.append('fileChunk', chunk);
+                        formData.append('chunkIndex', chunkIndex);
+                        formData.append('fileName', file.name);
+
+                        return $.ajax({
+                            url: '/videosummary/upload-chunk',
+                            type: 'POST',
+                            data: formData,
+                            contentType: false,
+                            processData: false
+                        });
+                    };
+
+                    for (let i = 0; i < totalChunks; i++) {
+                        let chunk = file.slice(i * chunkSize, (i + 1) * chunkSize);
+                        await uploadChunk(chunk, i);
+                    }
+
+                    // Уведомляем сервер, что все части файла загружены
+                    return $.ajax({
+                        url: '/videosummary/complete-upload',
+                        type: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({ fileName: file.name, totalChunks: totalChunks })
+                    });
+                };
+
+                // Основная функция загрузки всех файлов
+                var uploadAllFiles = async function () {
+                    for (let i = 0; i < totalFiles; i++) {
+                        let file = files[i];
+                        await uploadFileInChunks(file);
+                    }
+                };
+
+                // Функция для обработки файлов после загрузки
+               // Функция для обработки файлов после загрузки
+                var summarize_function = async function (formData) {
+                    // let formData = new FormData();
+
+                    let filenames = files.map(i => i.name);
+                    console.log(filenames);
+                    formData.delete("file");
+                    // let file = files[i];
+                    formData.append("filenames", filenames);
+                    console.log([...formData.values()]);
+
+                    // Создайте таймер
+                    const timeoutPromise = new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('Request timed out')), 10 * 60 * 1000) // 10 минут в миллисекундах
+                    );
+
+                    // Основной запрос
+                    const fetchPromise = fetch("{{ url_for('summarizeByUrl') }}", {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    try {
+                        // Ожидайте завершения одного из обещаний
+                        const response = await Promise.race([fetchPromise, timeoutPromise]);
+                        const data = await response.json();
+
+                        console.log(data);
+                        document.getElementById("gifwait").setAttribute("style", "display: none;");
+                        document.getElementById('summirized_data').removeAttribute("style");
+                        document.getElementById('summirized_data').innerHTML = "Результат запиту: " + data.summarized_data;
+
+                        if (data.hasOwnProperty("transcript")) {
+                            document.getElementById('transcript').removeAttribute("style");
+                            document.getElementById('transcript').innerHTML = "Результат транскрибації: " + data.transcript;
+                        }
+                        clearInterval(interval)
+                    } catch (error) {
+                        document.getElementById("gifwait").setAttribute("style", "display: none;");
+                        document.getElementById('summirized_data').removeAttribute("style");
+                        document.getElementById('summirized_data').innerHTML = "Виникла помилка. Повторіть запит пізніше, будь ласка";
+                        console.error('Error:', error);
+                        clearInterval(interval)
+                    }
+
+                    $('#submitButton').prop('disabled', false);
+                };
+
+                // Запуск загрузки всех файлов и вызов функции после завершения
+                uploadAllFiles().then(function () {
+                    console.log('All files uploaded');
+                    summarize_function(formData);
+                }).catch(function (error) {
+                    console.error('Error uploading files:', error);
+                    $('#submitButton').prop('disabled', false);
+                });
+            });
+
+            $('#summarizeDocxForm').on('submit', function (event) {
+                event.preventDefault();
+                var formData = new FormData(this);
+                $('#docxSubmitButton').prop('disabled', true);
+
+                document.getElementById('summirized_data').setAttribute("style", "display: none;")
+                document.getElementById('transcript').setAttribute("style", "display: none;")
+                document.getElementById("gifwait").removeAttribute("style")
+                // Получаем все файлы из инпута
+                let files = formData.getAll("file");
+                let totalFiles = files.length;
+
+                // Функция для загрузки одного файла по частям
+                var uploadFileInChunks = async function (file) {
+                    var chunkSize = 5 * 1024 * 1024; // 5MB
+                    var totalChunks = Math.ceil(file.size / chunkSize);
+
+                    var uploadChunk = function (chunk, chunkIndex) {
+                        var formData = new FormData();
+                        formData.append('fileChunk', chunk);
+                        formData.append('chunkIndex', chunkIndex);
+                        formData.append('fileName', file.name);
+
+                        return $.ajax({
+                            url: '/videosummary/upload-chunk',
+                            type: 'POST',
+                            data: formData,
+                            contentType: false,
+                            processData: false
+                        });
+                    };
+
+                    for (let i = 0; i < totalChunks; i++) {
+                        let chunk = file.slice(i * chunkSize, (i + 1) * chunkSize);
+                        await uploadChunk(chunk, i);
+                    }
+
+                    // Уведомляем сервер, что все части файла загружены
+                    return $.ajax({
+                        url: '/videosummary/complete-upload',
+                        type: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({ fileName: file.name, totalChunks: totalChunks })
+                    });
+                };
+
+                // Основная функция загрузки всех файлов
+                var uploadAllFiles = async function () {
+                    for (let i = 0; i < totalFiles; i++) {
+                        let file = files[i];
+                        await uploadFileInChunks(file);
+                    }
+                };
+
+                // Функция для обработки файлов после загрузки
+                var summarize_function = async function (formData) {
+                    // let formData = new FormData();
+
+                    let filenames = files.map(i => i.name)
+                    console.log(filenames)
+                    formData.delete("file");
+                    // let file = files[i];
+                    formData.append("filenames", filenames);
+                    console.log([...formData.values()]);
+
+                    await fetch("{{ url_for('summarizeDocByUrl') }}", {
+                        method: 'POST',
+                        body: formData
+                    })
+                        .then(response => response.json())
+                        .then(data => {
+                            console.log(data);
+                            document.getElementById("gifwait").setAttribute("style", "display: none;");
+                            document.getElementById('summirized_data').removeAttribute("style");
+                            document.getElementById('summirized_data').innerHTML = "Результат запиту: " + data.summirized_data;
+                            // if (data.hasOwnProperty("transcript")) {
+                            //     document.getElementById('transcript').removeAttribute("style");
+                            document.getElementById('transcript').innerHTML = "";
+                            // }
+                        })
+                        .catch(error => {
+                            document.getElementById("gifwait").setAttribute("style", "display: none;");
+                            document.getElementById('summirized_data').removeAttribute("style");
+                            document.getElementById('summirized_data').innerHTML = "<p style='color:red;'>Виникла помилка. Повторіть запит пізніше, будь ласка<p>";
+                            document.getElementById('transcript').innerHTML = "";
+                            console.error('Error:', error);
+                        });
+                    // }
+                    $('#submitButton').prop('disabled', false);
+                };
+
+                // Запуск загрузки всех файлов и вызов функции после завершения
+                uploadAllFiles().then(function () {
+                    console.log('All files uploaded');
+                    summarize_function(formData);
+                }).catch(function (error) {
+                    console.error('Error uploading files:', error);
+                    $('#submitButton').prop('disabled', false);
+                });
+            });
+        });
+    </script>
+</body>
+
+</html>

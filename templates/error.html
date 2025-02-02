@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+
+{% if error %}
+<p style="color: red;">{{ error }}</p>
+<button onclick="{{ url_for('logout')}} ">Вихід</button>
+{% endif %}
+</body>
+</html>

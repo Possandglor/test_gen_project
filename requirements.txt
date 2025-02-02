@@ -1,0 +1,14 @@
+fastapi
+vertexai
+flask[async]
+langchain_google_vertexai
+google-cloud-speech
+ffmpeg
+pydub
+moviepy
+docx2txt
+langchain-google-community[speech]
+av
+numpy
+flask-cors
+google-cloud-logging
